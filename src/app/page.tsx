@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Activity, Camera, Dumbbell, UtensilsCrossed, User, TrendingUp, Zap, LogOut } from "lucide-react"
@@ -24,6 +24,7 @@ export default function FitnessApp() {
   const [activeTab, setActiveTab] = useState("dashboard")
   const [user, setUser] = useState<SupabaseUser | null>(null)
   const [loading, setLoading] = useState(true)
+  const [dashboardKey, setDashboardKey] = useState(0)
   const router = useRouter()
 
   useEffect(() => {
@@ -54,6 +55,16 @@ export default function FitnessApp() {
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push("/login")
+  }
+
+  const handleMealAdded = () => {
+    // Força o dashboard a recarregar os dados
+    setDashboardKey(prev => prev + 1)
+  }
+
+  const handleWorkoutComplete = () => {
+    // Força o dashboard a recarregar os dados quando treino é concluído
+    setDashboardKey(prev => prev + 1)
   }
 
   if (loading) {
@@ -169,7 +180,7 @@ export default function FitnessApp() {
 
           {/* Tab Contents */}
           <TabsContent value="dashboard" className="mt-0">
-            <DashboardOverview userId={user.id} />
+            <DashboardOverview key={dashboardKey} userId={user.id} />
           </TabsContent>
 
           <TabsContent value="progress" className="mt-0">
@@ -177,11 +188,11 @@ export default function FitnessApp() {
           </TabsContent>
 
           <TabsContent value="nutrition" className="mt-0">
-            <NutritionModule userId={user.id} />
+            <NutritionModule userId={user.id} onMealAdded={handleMealAdded} />
           </TabsContent>
 
           <TabsContent value="workout" className="mt-0">
-            <WorkoutModule userId={user.id} />
+            <WorkoutModule userId={user.id} onWorkoutComplete={handleWorkoutComplete} />
           </TabsContent>
 
           <TabsContent value="diet" className="mt-0">

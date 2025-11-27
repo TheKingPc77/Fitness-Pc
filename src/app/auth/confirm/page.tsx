@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { CheckCircle, XCircle, Loader2 } from "lucide-react"
 
-export default function ConfirmPage() {
+// Componente que usa useSearchParams
+function ConfirmContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading")
@@ -109,5 +110,39 @@ export default function ConfirmPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+// Componente de Loading para o Suspense fallback
+function LoadingFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 p-4">
+      <div className="w-full max-w-md">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border-2 border-slate-200 dark:border-slate-800 p-8">
+          <div className="flex flex-col items-center text-center space-y-6">
+            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-orange-100 to-purple-100 dark:from-orange-950/30 dark:to-purple-950/30 flex items-center justify-center">
+              <Loader2 className="w-10 h-10 text-orange-600 dark:text-orange-400 animate-spin" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-2">
+                Carregando...
+              </h1>
+              <p className="text-slate-600 dark:text-slate-400">
+                Aguarde um momento
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Página principal com Suspense boundary
+export default function ConfirmPage() {
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <ConfirmContent />
+    </Suspense>
   )
 }

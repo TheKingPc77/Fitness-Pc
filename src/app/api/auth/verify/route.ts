@@ -4,15 +4,24 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false
-  }
-})
-
 export async function POST(request: NextRequest) {
   try {
+    // Verificar se as variáveis de ambiente do Supabase estão configuradas
+    if (!supabaseUrl || !supabaseServiceKey) {
+      console.error('Supabase environment variables not configured')
+      return NextResponse.json(
+        { error: 'Serviço temporariamente indisponível' },
+        { status: 503 }
+      )
+    }
+
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    })
+
     const { email, code } = await request.json()
 
     if (!email || !code) {

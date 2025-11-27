@@ -1,11 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Camera, Plus, Sparkles, Apple, Coffee, UtensilsCrossed } from "lucide-react"
+import { Camera, Plus, Sparkles, Apple, Coffee, UtensilsCrossed, Check } from "lucide-react"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts"
+import { supabase } from "@/lib/supabase"
 
 const dailyMeals = [
   { id: 1, name: "Café da Manhã", time: "08:00", calories: 450, protein: 25, carbs: 55, fat: 12, icon: Coffee },
@@ -14,26 +15,145 @@ const dailyMeals = [
   { id: 4, name: "Jantar", time: "19:30", calories: 520, protein: 38, carbs: 48, fat: 15, icon: UtensilsCrossed },
 ]
 
-const macrosData = [
-  { name: "Proteínas", value: 120, color: "#8b5cf6" },
-  { name: "Carboidratos", value: 206, color: "#ec4899" },
-  { name: "Gorduras", value: 53, color: "#f97316" },
-]
+interface NutritionModuleProps {
+  userId: string
+  onMealAdded?: () => void
+}
 
-const weeklyCalories = [
-  { day: "Seg", calories: 1850 },
-  { day: "Ter", calories: 2100 },
-  { day: "Qua", calories: 1950 },
-  { day: "Qui", calories: 2050 },
-  { day: "Sex", calories: 1900 },
-  { day: "Sáb", calories: 2200 },
-  { day: "Dom", calories: 2000 },
-]
+interface DailyNutrition {
+  calories: number
+  protein: number
+  carbs: number
+  fat: number
+  calorieGoal: number
+  proteinGoal: number
+  carbsGoal: number
+  fatGoal: number
+}
 
-export default function NutritionModule() {
+interface MealLog {
+  id: string
+  meal_name: string
+  calories: number
+  protein: number
+  carbs: number
+  fat: number
+  created_at: string
+}
+
+export default function NutritionModule({ userId, onMealAdded }: NutritionModuleProps) {
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<any>(null)
+  const [addingToDiary, setAddingToDiary] = useState(false)
+  const [mealAdded, setMealAdded] = useState(false)
+  const [dailyNutrition, setDailyNutrition] = useState<DailyNutrition>({
+    calories: 0,
+    protein: 0,
+    carbs: 0,
+    fat: 0,
+    calorieGoal: 2000,
+    proteinGoal: 150,
+    carbsGoal: 200,
+    fatGoal: 60,
+  })
+  const [mealLogs, setMealLogs] = useState<MealLog[]>([])
+  const [weeklyCalories, setWeeklyCalories] = useState<any[]>([])
+  const [macrosData, setMacrosData] = useState<any[]>([])
+
+  useEffect(() => {
+    if (userId) {
+      fetchNutritionData()
+    }
+  }, [userId])
+
+  const fetchNutritionData = async () => {
+    try {
+      const today = new Date().toISOString().split('T')[0]
+
+      // 1. Buscar refeições do dia
+      const { data: todayMeals } = await supabase
+        .from("meal_logs")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("date", today)
+        .order("created_at", { ascending: false })
+
+      if (todayMeals) {
+        setMealLogs(todayMeals)
+
+        // Calcular totais do dia
+        const totals = todayMeals.reduce(
+          (acc, meal) => ({
+            calories: acc.calories + (meal.calories || 0),
+            protein: acc.protein + (meal.protein || 0),
+            carbs: acc.carbs + (meal.carbs || 0),
+            fat: acc.fat + (meal.fat || 0),
+          }),
+          { calories: 0, protein: 0, carbs: 0, fat: 0 }
+        )
+
+        // Buscar metas do usuário
+        const { data: userGoals } = await supabase
+          .from("user_goals")
+          .select("target_calories")
+          .eq("user_id", userId)
+          .single()
+
+        setDailyNutrition({
+          ...totals,
+          calorieGoal: userGoals?.target_calories || 2000,
+          proteinGoal: 150,
+          carbsGoal: 200,
+          fatGoal: 60,
+        })
+
+        // Atualizar dados do gráfico de pizza
+        setMacrosData([
+          { name: "Proteínas", value: totals.protein, color: "#8b5cf6" },
+          { name: "Carboidratos", value: totals.carbs, color: "#ec4899" },
+          { name: "Gorduras", value: totals.fat, color: "#f97316" },
+        ])
+      }
+
+      // 2. Buscar calorias da semana para o gráfico
+      const oneWeekAgo = new Date()
+      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
+      
+      const { data: weeklyData } = await supabase
+        .from("daily_calories")
+        .select("consumed, date")
+        .eq("user_id", userId)
+        .gte("date", oneWeekAgo.toISOString().split('T')[0])
+        .order("date", { ascending: true })
+
+      if (weeklyData && weeklyData.length > 0) {
+        const daysOfWeek = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
+        const formattedWeeklyData = weeklyData.map((record) => {
+          const date = new Date(record.date)
+          return {
+            day: daysOfWeek[date.getDay()],
+            calories: record.consumed
+          }
+        })
+        setWeeklyCalories(formattedWeeklyData)
+      } else {
+        // Dados padrão se não houver registros
+        setWeeklyCalories([
+          { day: "Seg", calories: 0 },
+          { day: "Ter", calories: 0 },
+          { day: "Qua", calories: 0 },
+          { day: "Qui", calories: 0 },
+          { day: "Sex", calories: 0 },
+          { day: "Sáb", calories: 0 },
+          { day: "Dom", calories: 0 },
+        ])
+      }
+
+    } catch (error) {
+      console.error("Erro ao buscar dados nutricionais:", error)
+    }
+  }
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -42,6 +162,7 @@ export default function NutritionModule() {
       reader.onload = (event) => {
         setSelectedImage(event.target?.result as string)
         setAnalyzing(true)
+        setMealAdded(false)
         
         // Simular análise de IA
         setTimeout(() => {
@@ -60,9 +181,102 @@ export default function NutritionModule() {
     }
   }
 
-  const totalCalories = dailyMeals.reduce((sum, meal) => sum + meal.calories, 0)
-  const calorieGoal = 2000
-  const calorieProgress = (totalCalories / calorieGoal) * 100
+  const handleAddToDiary = async () => {
+    if (!analysisResult || !userId) return
+
+    try {
+      setAddingToDiary(true)
+      const today = new Date().toISOString().split('T')[0]
+
+      // 1. Buscar ou criar registro de calorias do dia
+      const { data: existingCalories, error: fetchError } = await supabase
+        .from("daily_calories")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("date", today)
+        .single()
+
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        throw fetchError
+      }
+
+      if (existingCalories) {
+        // Atualizar registro existente
+        const newConsumed = existingCalories.consumed + analysisResult.calories
+        
+        await supabase
+          .from("daily_calories")
+          .update({ 
+            consumed: newConsumed,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", existingCalories.id)
+      } else {
+        // Criar novo registro
+        await supabase
+          .from("daily_calories")
+          .insert({
+            user_id: userId,
+            date: today,
+            consumed: analysisResult.calories,
+            target: dailyNutrition.calorieGoal
+          })
+      }
+
+      // 2. Registrar a refeição no histórico
+      await supabase
+        .from("meal_logs")
+        .insert({
+          user_id: userId,
+          date: today,
+          meal_name: analysisResult.food,
+          calories: analysisResult.calories,
+          protein: analysisResult.protein,
+          carbs: analysisResult.carbs,
+          fat: analysisResult.fat,
+          image_url: selectedImage
+        })
+
+      setMealAdded(true)
+      
+      // Atualizar dados localmente
+      await fetchNutritionData()
+      
+      // Notificar o componente pai para atualizar o dashboard
+      if (onMealAdded) {
+        onMealAdded()
+      }
+
+      // Limpar após 2 segundos
+      setTimeout(() => {
+        setSelectedImage(null)
+        setAnalysisResult(null)
+        setMealAdded(false)
+      }, 2000)
+
+    } catch (error) {
+      console.error("Erro ao adicionar refeição:", error)
+      alert("Erro ao adicionar refeição ao diário. Tente novamente.")
+    } finally {
+      setAddingToDiary(false)
+    }
+  }
+
+  const calorieProgress = dailyNutrition.calorieGoal > 0 
+    ? (dailyNutrition.calories / dailyNutrition.calorieGoal) * 100 
+    : 0
+  
+  const proteinProgress = dailyNutrition.proteinGoal > 0 
+    ? (dailyNutrition.protein / dailyNutrition.proteinGoal) * 100 
+    : 0
+  
+  const carbsProgress = dailyNutrition.carbsGoal > 0 
+    ? (dailyNutrition.carbs / dailyNutrition.carbsGoal) * 100 
+    : 0
+  
+  const fatProgress = dailyNutrition.fatGoal > 0 
+    ? (dailyNutrition.fat / dailyNutrition.fatGoal) * 100 
+    : 0
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -72,12 +286,12 @@ export default function NutritionModule() {
         <p className="text-slate-500 dark:text-slate-400 mt-1">Identifique alimentos e conte calorias com IA</p>
       </div>
 
-      {/* Daily Summary */}
+      {/* Daily Summary - Dados Reais */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="p-6 bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-950/30 dark:to-red-950/30 border-orange-200 dark:border-orange-800">
           <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">Calorias Hoje</p>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">{totalCalories}</p>
-          <p className="text-xs text-slate-500 mt-1">Meta: {calorieGoal} kcal</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{Math.round(dailyNutrition.calories)}</p>
+          <p className="text-xs text-slate-500 mt-1">Meta: {dailyNutrition.calorieGoal} kcal</p>
           <div className="mt-3 h-2 bg-white dark:bg-slate-800 rounded-full overflow-hidden">
             <div 
               className="h-full bg-gradient-to-r from-orange-400 to-red-500 transition-all duration-500"
@@ -88,28 +302,37 @@ export default function NutritionModule() {
 
         <Card className="p-6 bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-950/30 dark:to-pink-950/30 border-purple-200 dark:border-purple-800">
           <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">Proteínas</p>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">120g</p>
-          <p className="text-xs text-slate-500 mt-1">Meta: 150g</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{Math.round(dailyNutrition.protein)}g</p>
+          <p className="text-xs text-slate-500 mt-1">Meta: {dailyNutrition.proteinGoal}g</p>
           <div className="mt-3 h-2 bg-white dark:bg-slate-800 rounded-full overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-purple-400 to-pink-500 w-[80%]" />
+            <div 
+              className="h-full bg-gradient-to-r from-purple-400 to-pink-500 transition-all duration-500" 
+              style={{ width: `${Math.min(proteinProgress, 100)}%` }}
+            />
           </div>
         </Card>
 
         <Card className="p-6 bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-950/30 dark:to-cyan-950/30 border-blue-200 dark:border-blue-800">
           <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">Carboidratos</p>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">206g</p>
-          <p className="text-xs text-slate-500 mt-1">Meta: 200g</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{Math.round(dailyNutrition.carbs)}g</p>
+          <p className="text-xs text-slate-500 mt-1">Meta: {dailyNutrition.carbsGoal}g</p>
           <div className="mt-3 h-2 bg-white dark:bg-slate-800 rounded-full overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-blue-400 to-cyan-500 w-[100%]" />
+            <div 
+              className="h-full bg-gradient-to-r from-blue-400 to-cyan-500 transition-all duration-500" 
+              style={{ width: `${Math.min(carbsProgress, 100)}%` }}
+            />
           </div>
         </Card>
 
         <Card className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 border-green-200 dark:border-green-800">
           <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">Gorduras</p>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white">53g</p>
-          <p className="text-xs text-slate-500 mt-1">Meta: 60g</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white">{Math.round(dailyNutrition.fat)}g</p>
+          <p className="text-xs text-slate-500 mt-1">Meta: {dailyNutrition.fatGoal}g</p>
           <div className="mt-3 h-2 bg-white dark:bg-slate-800 rounded-full overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-green-400 to-emerald-500 w-[88%]" />
+            <div 
+              className="h-full bg-gradient-to-r from-green-400 to-emerald-500 transition-all duration-500" 
+              style={{ width: `${Math.min(fatProgress, 100)}%` }}
+            />
           </div>
         </Card>
       </div>
@@ -176,9 +399,27 @@ export default function NutritionModule() {
                   <Sparkles className="w-4 h-4 text-green-500 flex-shrink-0 mt-0.5" />
                   {analysisResult.observations}
                 </p>
-                <Button className="w-full mt-4 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Adicionar ao Diário
+                <Button 
+                  className="w-full mt-4 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white"
+                  onClick={handleAddToDiary}
+                  disabled={addingToDiary || mealAdded}
+                >
+                  {mealAdded ? (
+                    <>
+                      <Check className="w-4 h-4 mr-2" />
+                      Adicionado com Sucesso!
+                    </>
+                  ) : addingToDiary ? (
+                    <>
+                      <Sparkles className="w-4 h-4 mr-2 animate-pulse" />
+                      Adicionando...
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Adicionar ao Diário
+                    </>
+                  )}
                 </Button>
               </div>
             )}
@@ -218,25 +459,31 @@ export default function NutritionModule() {
         {/* Macros Distribution */}
         <Card className="p-6 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
           <h3 className="text-lg font-semibold mb-4 text-slate-900 dark:text-white">Distribuição de Macros</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <PieChart>
-              <Pie
-                data={macrosData}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                outerRadius={80}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {macrosData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
+          {macrosData.some(m => m.value > 0) ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie
+                  data={macrosData}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  outerRadius={80}
+                  fill="#8884d8"
+                  dataKey="value"
+                >
+                  {macrosData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[250px] flex items-center justify-center text-slate-400">
+              <p>Adicione refeições para ver a distribuição</p>
+            </div>
+          )}
         </Card>
       </div>
 
@@ -244,23 +491,20 @@ export default function NutritionModule() {
       <Card className="p-6 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Diário Alimentar</h3>
-          <Button size="sm" className="bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white">
-            <Plus className="w-4 h-4 mr-2" />
-            Adicionar
-          </Button>
         </div>
         <div className="space-y-4">
-          {dailyMeals.map((meal) => {
-            const Icon = meal.icon
-            return (
+          {mealLogs.length > 0 ? (
+            mealLogs.map((meal) => (
               <div key={meal.id} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl hover:shadow-md transition-shadow">
                 <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center flex-shrink-0">
-                  <Icon className="w-6 h-6 text-white" />
+                  <UtensilsCrossed className="w-6 h-6 text-white" />
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
-                    <h4 className="font-semibold text-slate-900 dark:text-white">{meal.name}</h4>
-                    <span className="text-sm text-slate-500">{meal.time}</span>
+                    <h4 className="font-semibold text-slate-900 dark:text-white">{meal.meal_name}</h4>
+                    <span className="text-sm text-slate-500">
+                      {new Date(meal.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
                   </div>
                   <div className="flex items-center gap-4 text-xs text-slate-600 dark:text-slate-400">
                     <span>{meal.calories} kcal</span>
@@ -270,8 +514,14 @@ export default function NutritionModule() {
                   </div>
                 </div>
               </div>
-            )
-          })}
+            ))
+          ) : (
+            <div className="text-center py-8 text-slate-400">
+              <UtensilsCrossed className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>Nenhuma refeição registrada hoje</p>
+              <p className="text-sm mt-1">Adicione sua primeira refeição acima</p>
+            </div>
+          )}
         </div>
       </Card>
     </div>
