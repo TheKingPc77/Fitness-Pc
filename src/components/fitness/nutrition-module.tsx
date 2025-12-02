@@ -155,27 +155,59 @@ export default function NutritionModule({ userId, onMealAdded }: NutritionModule
     }
   }
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
       const reader = new FileReader()
-      reader.onload = (event) => {
-        setSelectedImage(event.target?.result as string)
+      reader.onload = async (event) => {
+        const imageData = event.target?.result as string
+        setSelectedImage(imageData)
         setAnalyzing(true)
         setMealAdded(false)
         
-        // Simular análise de IA
-        setTimeout(() => {
+        try {
+          // Análise REAL usando OpenAI Vision API
+          const response = await fetch('/api/analyze-food', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ image: imageData }),
+          })
+
+          const result = await response.json()
+
+          if (!response.ok) {
+            throw new Error(result.details || result.error || 'Erro ao analisar imagem')
+          }
+          
           setAnalyzing(false)
           setAnalysisResult({
-            food: "Frango Grelhado com Arroz Integral e Brócolis",
-            calories: 520,
-            protein: 45,
-            carbs: 52,
-            fat: 12,
-            observations: "Refeição balanceada e saudável! Rica em proteínas e fibras. Perfeita para ganho muscular."
+            food: result.food,
+            calories: Math.round(result.calories),
+            protein: Math.round(result.protein),
+            carbs: Math.round(result.carbs),
+            fat: Math.round(result.fat),
+            observations: result.observations
           })
-        }, 2500)
+        } catch (error: any) {
+          console.error('Erro na análise:', error)
+          setAnalyzing(false)
+          
+          // Mensagem de erro mais específica
+          const errorMessage = error.message || 'Não foi possível analisar a imagem'
+          
+          setAnalysisResult({
+            food: "Erro ao analisar imagem",
+            calories: 0,
+            protein: 0,
+            carbs: 0,
+            fat: 0,
+            observations: errorMessage.includes('OPENAI_API_KEY') 
+              ? "Configure a variável OPENAI_API_KEY para usar a análise de alimentos com IA."
+              : `${errorMessage}. Tente novamente com uma foto mais clara do prato.`
+          })
+        }
       }
       reader.readAsDataURL(file)
     }
